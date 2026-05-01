@@ -1,0 +1,269 @@
+<h1>Design Spec — <code>ReactiveAgent</code></h1>
+<p><strong>File:</strong> <code>agents/reactive_agent.py</code><br><strong>Type:</strong> Concrete class, extends <code>BaseAgent</code><br><strong>Phase:</strong> Foundation (Phase 1)</p>
+<hr>
+<h2>1. Purpose</h2>
+<p><code>ReactiveAgent</code> is the simplest possible agent: it holds a static table of
+keyword → response pairs and fires the first match.  There is no learning,
+no history, and no external service calls.  Response time is O(n) in the
+number of rules and is effectively instantaneous.</p>
+<p>Primary use-case: <strong>first-contact customer-support triage</strong> where a handful
+of high-frequency questions can be deflected without human intervention or
+an LLM call.</p>
+<hr>
+<h2>2. Class Signature</h2>
+<pre><code class="language-python">class ReactiveAgent(BaseAgent):
+    def __init__(
+        self,
+        name: str = &quot;SupportBot&quot;,
+        goal: str = &quot;Answer customer queries instantly using predefined rules&quot;,
+        rules: dict[str, str] | None = None,
+        fallback: str = DEFAULT_FALLBACK,
+    ) -&gt; None
+</code></pre>
+<hr>
+<h2>3. Module-Level Constants</h2>
+<table>
+<thead>
+<tr>
+<th>Constant</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>DEFAULT_RULES</code></td>
+<td><code>dict[str, str]</code></td>
+<td>Five built-in keyword → response pairs (price, refund, delivery, password, hours).</td>
+</tr>
+<tr>
+<td><code>DEFAULT_FALLBACK</code></td>
+<td><code>str</code></td>
+<td>Response returned when no keyword matches.</td>
+</tr>
+</tbody></table>
+<h3>Default Rule Table</h3>
+<table>
+<thead>
+<tr>
+<th>Keyword</th>
+<th>Response</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>&quot;price&quot;</code></td>
+<td>Pricing page link</td>
+</tr>
+<tr>
+<td><code>&quot;refund&quot;</code></td>
+<td>Refund timeline + ticket offer</td>
+</tr>
+<tr>
+<td><code>&quot;delivery&quot;</code></td>
+<td>Delivery timeline</td>
+</tr>
+<tr>
+<td><code>&quot;password&quot;</code></td>
+<td>Password reset link</td>
+</tr>
+<tr>
+<td><code>&quot;hours&quot;</code></td>
+<td>Business hours</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>4. Instance Attributes</h2>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Type</th>
+<th>Source</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>rules</code></td>
+<td><code>dict[str, str]</code></td>
+<td>Constructor arg or <code>DEFAULT_RULES</code></td>
+<td>Keyword → canned response map.</td>
+</tr>
+<tr>
+<td><code>fallback</code></td>
+<td><code>str</code></td>
+<td>Constructor arg or <code>DEFAULT_FALLBACK</code></td>
+<td>Response when no rule fires.</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td><code>str</code></td>
+<td>Constructor arg</td>
+<td>Inherited from <code>BaseAgent</code>.</td>
+</tr>
+<tr>
+<td><code>goal</code></td>
+<td><code>str</code></td>
+<td>Constructor arg</td>
+<td>Inherited from <code>BaseAgent</code>.</td>
+</tr>
+<tr>
+<td><code>memory</code></td>
+<td><code>list[dict]</code></td>
+<td><code>BaseAgent</code></td>
+<td>Episodic store appended on every <code>run()</code> call.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>5. Method Specifications</h2>
+<h3><code>perceive(observation: Any) → str</code></h3>
+<p>Normalises input to lower-case, stripped plain text.</p>
+<pre><code>input: Any  →  str(observation).lower().strip()
+</code></pre>
+<ul>
+<li>Guarantees <code>decide()</code> always receives a consistent lowercase string.</li>
+<li>Non-string inputs (int, dict, etc.) are coerced via <code>str()</code>.</li>
+</ul>
+<hr>
+<h3><code>decide(perception: str) → str</code></h3>
+<p>Linear scan of <code>self.rules</code>; returns the first matching response.</p>
+<pre><code>for keyword, response in self.rules.items():
+    if keyword in perception:
+        return response
+return self.fallback
+</code></pre>
+<p><strong>Matching semantics:</strong> substring match (case-insensitive because <code>perceive</code>
+already lowercased the input).  Rule order is insertion order (Python 3.7+
+dict guarantee) — put higher-priority rules first.</p>
+<p><strong>Edge cases:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Multiple keywords match</td>
+<td>First match wins (dict insertion order).</td>
+</tr>
+<tr>
+<td>No keyword matches</td>
+<td>Returns <code>self.fallback</code>.</td>
+</tr>
+<tr>
+<td>Empty input</td>
+<td>Returns <code>self.fallback</code>.</td>
+</tr>
+</tbody></table>
+<hr>
+<h3><code>act(action: str) → str</code></h3>
+<p>Identity pass-through — the chosen response string is returned unchanged.</p>
+<pre><code class="language-python">def act(self, action: str) -&gt; str:
+    return action
+</code></pre>
+<p><code>act()</code> is the hook for side-effects in richer subclasses (e.g., logging
+the response to a CRM, sending an SMS).  In <code>ReactiveAgent</code> it is
+intentionally a no-op to keep the class stateless.</p>
+<hr>
+<h2>6. Data Flow</h2>
+<pre><code>User message (Any)
+   │
+   ▼  perceive()
+&quot;lowercase stripped string&quot;
+   │
+   ▼  decide()
+&quot;canned response string&quot;   (first matching rule, or fallback)
+   │
+   ▼  act()
+&quot;canned response string&quot;   (unchanged)
+   │
+   ▼
+Caller receives response; memory entry appended
+</code></pre>
+<hr>
+<h2>7. Dependencies</h2>
+<table>
+<thead>
+<tr>
+<th>Import</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>typing.Any</code></td>
+<td>perceive signature</td>
+</tr>
+<tr>
+<td><code>.base_agent.BaseAgent</code></td>
+<td>Inheritance</td>
+</tr>
+</tbody></table>
+<p>No third-party dependencies.</p>
+<hr>
+<h2>8. Configuration &amp; Customisation</h2>
+<h3>Replacing the rule table</h3>
+<pre><code class="language-python">my_rules = {
+    &quot;invoice&quot;:  &quot;Invoices are emailed within 24 hours of purchase.&quot;,
+    &quot;trial&quot;:    &quot;You can start a 14-day free trial at /trial.&quot;,
+}
+agent = ReactiveAgent(rules=my_rules)
+</code></pre>
+<h3>Custom fallback</h3>
+<pre><code class="language-python">agent = ReactiveAgent(
+    fallback=&quot;I&#39;m still learning! Please email support@example.com.&quot;
+)
+</code></pre>
+<h3>Extending at runtime</h3>
+<pre><code class="language-python">agent.rules[&quot;cancel&quot;] = &quot;To cancel your subscription visit /account/cancel.&quot;
+</code></pre>
+<hr>
+<h2>9. Extension Points</h2>
+<ul>
+<li><strong>Subclass and override <code>act()</code></strong> to add logging, CRM writes, or analytics.</li>
+<li><strong>Override <code>decide()</code></strong> to support regex patterns instead of substring matching.</li>
+<li><strong>Chain agents:</strong> use <code>ReactiveAgent</code> as a fast pre-filter; fall through to <code>LLMAgent</code> when the response equals <code>fallback</code>.</li>
+</ul>
+<hr>
+<h2>10. Performance Characteristics</h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Latency per <code>run()</code></td>
+<td>&lt; 1 ms (no I/O)</td>
+</tr>
+<tr>
+<td>Memory per instance</td>
+<td>Negligible (dict + list)</td>
+</tr>
+<tr>
+<td>Scalability</td>
+<td>Linear in rule count — add thousands of rules with no practical impact</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>11. Limitations</h2>
+<ul>
+<li>Exact keyword substring matching only — no stemming, synonyms, or semantic similarity.</li>
+<li>Rules are evaluated in declaration order; complex priority logic requires manual ordering.</li>
+<li>Stateless between turns — cannot handle multi-turn conversations (e.g., &quot;which product?&quot; → &quot;the one I mentioned earlier&quot;).</li>
+<li>Not suitable for open-ended queries; hand off to <code>LLMAgent</code> for those.</li>
+</ul>
+<hr>
+<h2>12. Usage Example</h2>
+<pre><code class="language-python">from agents import ReactiveAgent
+
+agent = ReactiveAgent()
+
+print(agent.run(&quot;What is the price?&quot;))
+# &quot;Our pricing page is at /pricing. Can I help with anything else?&quot;
+
+print(agent.run(&quot;I need a refund&quot;))
+# &quot;Refunds are processed within 5–7 business days. Shall I open a ticket?&quot;
+
+print(agent.run(&quot;Tell me a joke&quot;))
+# &quot;I&#39;m not sure about that. Would you like me to connect you with a human agent?&quot;
+</code></pre>

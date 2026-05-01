@@ -1,0 +1,140 @@
+<h1>Design Spec — <code>BaseAgent</code></h1>
+<p><strong>File:</strong> <code>agents/base_agent.py</code><br><strong>Type:</strong> Abstract base class (ABC)<br><strong>Phase:</strong> Foundation (Phase 1)</p>
+<hr>
+<h2>1. Purpose</h2>
+<p><code>BaseAgent</code> is the common contract every agent in this system must fulfil.
+It encodes the classical <strong>perceive → decide → act</strong> loop that underpins all
+agentic AI architectures.  Concrete subclasses implement the three abstract
+methods; the base class wires them together in <code>run()</code> and provides shared
+episodic memory.</p>
+<hr>
+<h2>2. Class Signature</h2>
+<pre><code class="language-python">class BaseAgent(ABC):
+    def __init__(self, name: str, goal: str) -&gt; None
+</code></pre>
+<hr>
+<h2>3. Attributes</h2>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>name</code></td>
+<td><code>str</code></td>
+<td>Human-readable identifier shown in logs and <code>__repr__</code>.</td>
+</tr>
+<tr>
+<td><code>goal</code></td>
+<td><code>str</code></td>
+<td>One-sentence statement of purpose. Used by <code>LLMAgent</code> as a system prompt.</td>
+</tr>
+<tr>
+<td><code>memory</code></td>
+<td><code>list[dict]</code></td>
+<td>Append-only episodic memory. Each entry: <code>{&quot;observation&quot;, &quot;action&quot;, &quot;result&quot;}</code>.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>4. Abstract Methods</h2>
+<h3><code>perceive(observation: Any) → Any</code></h3>
+<p>Transform raw environment input into a normalised internal representation.</p>
+<ul>
+<li><strong>Contract:</strong> Must accept <code>Any</code> input and return something <code>decide()</code> can consume.</li>
+<li><strong>Typical implementation:</strong> Lowercase/strip a string; parse a JSON payload; decode sensor bytes.</li>
+</ul>
+<h3><code>decide(perception: Any) → Any</code></h3>
+<p>Select an action given the current perception.</p>
+<ul>
+<li><strong>Contract:</strong> Stateless w.r.t. the base class (subclasses may maintain state).</li>
+<li><strong>Typical implementation:</strong> Keyword lookup, model inference, LLM prompt construction.</li>
+</ul>
+<h3><code>act(action: Any) → Any</code></h3>
+<p>Execute the chosen action and produce an observable result.</p>
+<ul>
+<li><strong>Contract:</strong> Returns a value that will be stored in <code>memory</code> and returned to the caller.</li>
+<li><strong>Typical implementation:</strong> Return a response string; call an API; write a file.</li>
+</ul>
+<hr>
+<h2>5. Concrete Methods</h2>
+<h3><code>run(observation: Any) → Any</code></h3>
+<p>The full agentic loop:</p>
+<pre><code>observation
+   │
+   ▼ perceive()
+perception
+   │
+   ▼ decide()
+action
+   │
+   ▼ act()
+result ──► appended to self.memory ──► returned to caller
+</code></pre>
+<p>Memory entry schema:</p>
+<pre><code class="language-python">{&quot;observation&quot;: &lt;raw input&gt;, &quot;action&quot;: &lt;chosen action&gt;, &quot;result&quot;: &lt;output&gt;}
+</code></pre>
+<h3><code>__repr__() → str</code></h3>
+<p>Returns <code>&quot;ClassName(name=&#39;...&#39;, goal=&#39;...&#39;)&quot;</code> for debugging.</p>
+<hr>
+<h2>6. Data Flow</h2>
+<pre><code>Caller
+  │  observation
+  ▼
+BaseAgent.run()
+  ├─► perceive()   →  internal perception
+  ├─► decide()     →  action descriptor
+  ├─► act()        →  result
+  └─► memory.append({...})
+  │
+  ▼  result
+Caller
+</code></pre>
+<hr>
+<h2>7. Dependencies</h2>
+<table>
+<thead>
+<tr>
+<th>Import</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>abc.ABC</code>, <code>abc.abstractmethod</code></td>
+<td>Enforce subclass implementation</td>
+</tr>
+<tr>
+<td><code>typing.Any</code></td>
+<td>Flexible type hints for polymorphic interface</td>
+</tr>
+</tbody></table>
+<p>No third-party dependencies.</p>
+<hr>
+<h2>8. Extension Points</h2>
+<ul>
+<li><strong>Override <code>run()</code></strong> to add pre/post-processing (e.g., logging, rate-limiting) without touching <code>perceive</code>/<code>decide</code>/<code>act</code>.</li>
+<li><strong>Extend <code>memory</code></strong> into a richer object (e.g., timestamped, vector-embedded) by subclassing and overriding the append logic.</li>
+<li><strong>Add async variants</strong> (<code>aperceive</code>, <code>adecide</code>, <code>aact</code>) for I/O-bound agents — this is planned in Phase 6.</li>
+</ul>
+<hr>
+<h2>9. Constraints &amp; Limitations</h2>
+<ul>
+<li><code>memory</code> grows unboundedly; production subclasses should cap or flush it.</li>
+<li>The base class is synchronous only.</li>
+<li>No built-in thread safety; external locking is required for concurrent access.</li>
+</ul>
+<hr>
+<h2>10. Usage Example</h2>
+<pre><code class="language-python"># You cannot instantiate BaseAgent directly — it is abstract.
+# Minimal concrete subclass:
+class EchoAgent(BaseAgent):
+    def perceive(self, obs): return str(obs)
+    def decide(self, perception): return f&quot;Echo: {perception}&quot;
+    def act(self, action): return action
+
+agent = EchoAgent(name=&quot;Echo&quot;, goal=&quot;Repeat everything&quot;)
+print(agent.run(&quot;hello&quot;))   # &quot;Echo: hello&quot;
+print(agent.memory)         # [{&quot;observation&quot;: &quot;hello&quot;, &quot;action&quot;: &quot;Echo: hello&quot;, &quot;result&quot;: &quot;Echo: hello&quot;}]
+</code></pre>

@@ -1,0 +1,373 @@
+<h1>Design Spec — <code>LLMAgent</code></h1>
+<p><strong>File:</strong> <code>agents/llm_agent.py</code><br><strong>Type:</strong> Concrete class, extends <code>BaseAgent</code><br><strong>Phase:</strong> LLM Backbone (Phase 2)</p>
+<hr>
+<h2>1. Purpose</h2>
+<p><code>LLMAgent</code> wraps a real large language model and exposes it through the
+standard <code>BaseAgent</code> interface.  It is <strong>provider-agnostic</strong>: the same class
+drives OpenAI, Anthropic, and local Ollama by reading a single environment
+variable.</p>
+<p>Key capabilities beyond <code>ReactiveAgent</code> / <code>LearningAgent</code>:</p>
+<ul>
+<li>Open-ended, generative responses (not limited to a fixed label or rule set).</li>
+<li>Multi-turn conversation with a sliding-window history buffer.</li>
+<li>System prompt derived from the agent&#39;s <code>goal</code>, allowing persona / behaviour
+customisation without code changes.</li>
+</ul>
+<hr>
+<h2>2. Class Signature</h2>
+<pre><code class="language-python">class LLMAgent(BaseAgent):
+    def __init__(
+        self,
+        name: str = &quot;LLMAgent&quot;,
+        goal: str = &quot;You are a helpful AI assistant.&quot;,
+        provider: str | None = None,
+        model: str | None = None,
+        history_window: int = 10,
+        temperature: float = 0.7,
+    ) -&gt; None
+</code></pre>
+<hr>
+<h2>3. Module-Level Constants</h2>
+<table>
+<thead>
+<tr>
+<th>Constant</th>
+<th>Value</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>DEFAULT_HISTORY_WINDOW</code></td>
+<td><code>10</code></td>
+<td>Number of conversation <em>turns</em> (user + assistant pairs) kept in context.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>4. Instance Attributes</h2>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Type</th>
+<th>Source</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>name</code></td>
+<td><code>str</code></td>
+<td>Constructor</td>
+<td>Inherited.</td>
+</tr>
+<tr>
+<td><code>goal</code></td>
+<td><code>str</code></td>
+<td>Constructor</td>
+<td>Becomes the LLM system prompt.</td>
+</tr>
+<tr>
+<td><code>provider</code></td>
+<td><code>str</code></td>
+<td>Constructor or <code>AGENT_PROVIDER</code> env var</td>
+<td><code>&quot;openai&quot;</code> | <code>&quot;anthropic&quot;</code> | <code>&quot;ollama&quot;</code>.</td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td><code>str</code></td>
+<td>Constructor or <code>LLM_MODEL</code> env var</td>
+<td>Model identifier (e.g. <code>&quot;gpt-4o&quot;</code>).</td>
+</tr>
+<tr>
+<td><code>history_window</code></td>
+<td><code>int</code></td>
+<td>Constructor</td>
+<td>Max conversation turns kept; older turns are dropped.</td>
+</tr>
+<tr>
+<td><code>temperature</code></td>
+<td><code>float</code></td>
+<td>Constructor</td>
+<td>Sampling temperature passed to the LLM API.</td>
+</tr>
+<tr>
+<td><code>_history</code></td>
+<td><code>list[dict]</code></td>
+<td>Internal</td>
+<td><code>[{&quot;role&quot;: &quot;user&quot;|&quot;assistant&quot;, &quot;content&quot;: str}, ...]</code></td>
+</tr>
+<tr>
+<td><code>_client</code></td>
+<td><code>Any</code></td>
+<td><code>_build_client()</code></td>
+<td>Provider SDK client (OpenAI / Anthropic / Ollama).</td>
+</tr>
+<tr>
+<td><code>memory</code></td>
+<td><code>list[dict]</code></td>
+<td><code>BaseAgent</code></td>
+<td>Episodic store appended on every <code>run()</code> call.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>5. Environment Variables</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>AGENT_PROVIDER</code></td>
+<td><code>&quot;openai&quot;</code></td>
+<td>Selects the LLM provider.</td>
+</tr>
+<tr>
+<td><code>OPENAI_API_KEY</code></td>
+<td><em>(required for openai)</em></td>
+<td>OpenAI secret key.</td>
+</tr>
+<tr>
+<td><code>ANTHROPIC_API_KEY</code></td>
+<td><em>(required for anthropic)</em></td>
+<td>Anthropic secret key.</td>
+</tr>
+<tr>
+<td><code>LLM_MODEL</code></td>
+<td>Provider default (see below)</td>
+<td>Model name override.</td>
+</tr>
+<tr>
+<td><code>OLLAMA_BASE_URL</code></td>
+<td><code>http://localhost:11434/v1</code></td>
+<td>Ollama API base URL.</td>
+</tr>
+<tr>
+<td><code>OLLAMA_MODEL</code></td>
+<td><code>&quot;llama3&quot;</code></td>
+<td>Model name when using Ollama.</td>
+</tr>
+</tbody></table>
+<h3>Provider Default Models</h3>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>Default model</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>openai</code></td>
+<td><code>gpt-4o</code></td>
+</tr>
+<tr>
+<td><code>anthropic</code></td>
+<td><code>claude-3-5-sonnet-20241022</code></td>
+</tr>
+<tr>
+<td><code>ollama</code></td>
+<td>value of <code>OLLAMA_MODEL</code> env var, else <code>llama3</code></td>
+</tr>
+</tbody></table>
+<hr>
+<h2>6. Method Specifications</h2>
+<h3><code>perceive(observation: Any) → str</code></h3>
+<p>Strips the raw input to a clean string.</p>
+<pre><code class="language-python">return str(observation).strip()
+</code></pre>
+<hr>
+<h3><code>decide(perception: str) → list[dict]</code></h3>
+<p>Appends the user turn to <code>_history</code>, then builds the full messages list
+to pass to the LLM.</p>
+<p><strong>Sliding-window logic:</strong></p>
+<pre><code>kept_history = _history[-(history_window * 2):]
+messages = [{&quot;role&quot;: &quot;system&quot;, &quot;content&quot;: self.goal}] + kept_history
+</code></pre>
+<p><code>history_window * 2</code> because each turn has two entries (user + assistant).</p>
+<p><strong>Return value:</strong> OpenAI-compatible messages list ready for the API call.</p>
+<hr>
+<h3><code>act(action: list[dict]) → str</code></h3>
+<p>Calls the LLM via the appropriate provider and appends the assistant reply
+to <code>_history</code>.</p>
+<pre><code class="language-python">reply = self._call_llm(action)
+self._history.append({&quot;role&quot;: &quot;assistant&quot;, &quot;content&quot;: reply})
+return reply
+</code></pre>
+<hr>
+<h3><code>reset() → None</code></h3>
+<p>Clears <code>_history</code>, starting a fresh conversation while keeping the same
+agent instance and system prompt.</p>
+<hr>
+<h3><code>history</code> (property)</h3>
+<p>Returns a shallow copy of <code>_history</code> as a read-only list.</p>
+<hr>
+<h2>7. Provider Dispatch Architecture</h2>
+<pre><code>LLMAgent._build_client()
+   ├─ &quot;openai&quot;    → OpenAI(api_key=OPENAI_API_KEY)
+   ├─ &quot;anthropic&quot; → anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+   └─ &quot;ollama&quot;    → OpenAI(api_key=&quot;ollama&quot;, base_url=OLLAMA_BASE_URL)
+                    (Ollama exposes an OpenAI-compatible REST API)
+
+LLMAgent._call_llm(messages)
+   ├─ provider in (&quot;openai&quot;, &quot;ollama&quot;) → _call_openai_compat()
+   └─ provider == &quot;anthropic&quot;         → _call_anthropic()
+</code></pre>
+<h3><code>_call_openai_compat(messages) → str</code></h3>
+<pre><code class="language-python">response = client.chat.completions.create(
+    model=self.model,
+    messages=messages,
+    temperature=self.temperature,
+)
+return response.choices[0].message.content.strip()
+</code></pre>
+<h3><code>_call_anthropic(messages) → str</code></h3>
+<p>Anthropic&#39;s API separates the system prompt from user/assistant messages:</p>
+<pre><code class="language-python">system       = &lt;first message with role &quot;system&quot;&gt;
+user_messages = [m for m in messages if m[&quot;role&quot;] != &quot;system&quot;]
+response = client.messages.create(
+    model=self.model,
+    max_tokens=1024,
+    system=system,
+    messages=user_messages,
+    temperature=self.temperature,
+)
+return response.content[0].text.strip()
+</code></pre>
+<hr>
+<h2>8. Multi-Turn Conversation Data Flow</h2>
+<pre><code>Turn 1
+  User: &quot;How do I reset my password?&quot;
+    perceive → &quot;How do I reset my password?&quot;
+    decide   → appends user msg to _history
+               builds: [system, {user: &quot;How do I...&quot;}]
+    act      → calls LLM → &quot;Visit /account/reset.&quot;
+               appends assistant msg to _history
+
+Turn 2
+  User: &quot;What if I forgot my email too?&quot;
+    perceive → &quot;What if I forgot my email too?&quot;
+    decide   → appends user msg
+               builds: [system, {user: T1}, {asst: T1}, {user: T2}]
+    act      → calls LLM with full context → contextual reply
+</code></pre>
+<p>History is capped at <code>history_window * 2</code> entries before the system message
+is prepended, keeping total token usage bounded.</p>
+<hr>
+<h2>9. Error Handling</h2>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Exception</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>openai</code> package missing</td>
+<td><code>ImportError</code></td>
+<td>Instructs <code>pip install openai</code></td>
+</tr>
+<tr>
+<td><code>anthropic</code> package missing</td>
+<td><code>ImportError</code></td>
+<td>Instructs <code>pip install anthropic</code></td>
+</tr>
+<tr>
+<td><code>OPENAI_API_KEY</code> not set</td>
+<td><code>EnvironmentError</code></td>
+<td>Variable name reminder</td>
+</tr>
+<tr>
+<td><code>ANTHROPIC_API_KEY</code> not set</td>
+<td><code>EnvironmentError</code></td>
+<td>Variable name reminder</td>
+</tr>
+<tr>
+<td>Unknown provider string</td>
+<td><code>ValueError</code></td>
+<td>Lists valid providers</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>10. Dependencies</h2>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>openai</code></td>
+<td>OpenAI + Ollama API clients</td>
+</tr>
+<tr>
+<td><code>anthropic</code></td>
+<td>Anthropic API client</td>
+</tr>
+<tr>
+<td><code>python-dotenv</code></td>
+<td><code>.env</code> loading in <code>main.py</code> (not imported in this file)</td>
+</tr>
+<tr>
+<td><code>os</code></td>
+<td>Environment variable reads</td>
+</tr>
+<tr>
+<td><code>.base_agent.BaseAgent</code></td>
+<td>Inheritance</td>
+</tr>
+</tbody></table>
+<p>Both <code>openai</code> and <code>anthropic</code> are optional at import time — <code>ImportError</code> is
+raised lazily in <code>_build_client()</code> only if the missing provider is actually
+requested.</p>
+<hr>
+<h2>11. Configuration via <code>.env</code></h2>
+<pre><code class="language-ini"># .env  (copy from .env.example)
+AGENT_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+LLM_MODEL=gpt-4o
+</code></pre>
+<hr>
+<h2>12. Extension Points</h2>
+<ul>
+<li><strong>Add a new provider:</strong> implement <code>_build_&lt;provider&gt;_client()</code> and <code>_call_&lt;provider&gt;()</code>, then register in <code>_build_client()</code> / <code>_call_llm()</code>.</li>
+<li><strong>Stream responses:</strong> override <code>act()</code> to use the streaming API and yield tokens.</li>
+<li><strong>Tool calling:</strong> override <code>decide()</code> to inject tool definitions into the messages list; override <code>act()</code> to detect <code>tool_use</code> responses and dispatch them — the planned approach for Phase 3.</li>
+<li><strong>Structured output:</strong> pass <code>response_format={&quot;type&quot;: &quot;json_object&quot;}</code> in <code>_call_openai_compat()</code>.</li>
+<li><strong>Async I/O:</strong> replace the sync client calls with <code>AsyncOpenAI</code> / <code>AsyncAnthropic</code> in an <code>async def arun()</code> override.</li>
+</ul>
+<hr>
+<h2>13. Limitations</h2>
+<ul>
+<li>Synchronous only; one token at a time — not suitable for streaming UIs without modifications.</li>
+<li><code>max_tokens=1024</code> is hardcoded in the Anthropic path; long responses may be truncated.</li>
+<li>History window trims by turn count, not by token count — very long turns can still exceed context limits.</li>
+<li>No retry logic or exponential back-off on API errors.</li>
+</ul>
+<hr>
+<h2>14. Usage Example</h2>
+<pre><code class="language-python">import os
+os.environ[&quot;AGENT_PROVIDER&quot;] = &quot;openai&quot;
+os.environ[&quot;OPENAI_API_KEY&quot;] = &quot;sk-...&quot;
+
+from agents import LLMAgent
+
+agent = LLMAgent(goal=&quot;You are a concise technical support agent.&quot;)
+
+print(agent.run(&quot;How do I install Python on macOS?&quot;))
+print(agent.run(&quot;What about Windows?&quot;))   # references prior turn via history
+
+agent.reset()   # start fresh
+print(agent.history)  # []
+</code></pre>
+<h3>Ollama (local, no API key)</h3>
+<pre><code class="language-python">import os
+os.environ[&quot;AGENT_PROVIDER&quot;] = &quot;ollama&quot;
+os.environ[&quot;OLLAMA_MODEL&quot;]   = &quot;llama3&quot;
+
+from agents import LLMAgent
+agent = LLMAgent()
+print(agent.run(&quot;Explain closures in Python&quot;))
+</code></pre>

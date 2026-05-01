@@ -1,0 +1,13 @@
+# Phase 1
+numpy>=1.26
+pandas>=2.2
+scikit-learn>=1.4
+matplotlib>=3.8
+
+# Phase 2
+openai>=1.30
+anthropic>=0.28
+python-dotenv>=1.0
+
+# Testing
+pytest>=8.0

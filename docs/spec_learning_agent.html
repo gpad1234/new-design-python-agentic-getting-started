@@ -1,0 +1,250 @@
+<h1>Design Spec — <code>LearningAgent</code></h1>
+<p><strong>File:</strong> <code>agents/learning_agent.py</code><br><strong>Type:</strong> Concrete class, extends <code>BaseAgent</code><br><strong>Phase:</strong> Foundation (Phase 1)</p>
+<hr>
+<h2>1. Purpose</h2>
+<p><code>LearningAgent</code> is a supervised text-classification agent.  It learns from
+labelled <code>(text, intent)</code> examples, builds a <strong>TF-IDF + Logistic Regression</strong>
+sklearn pipeline, and then classifies new observations at inference time.</p>
+<p>Primary use-case: <strong>intent routing</strong> — mapping free-text user messages to a
+fixed set of business intents so downstream systems know what action to take.</p>
+<hr>
+<h2>2. Class Signature</h2>
+<pre><code class="language-python">class LearningAgent(BaseAgent):
+    def __init__(
+        self,
+        name: str = &quot;IntentClassifier&quot;,
+        goal: str = &quot;Classify user intent and route to the correct action&quot;,
+    ) -&gt; None
+</code></pre>
+<hr>
+<h2>3. Instance Attributes</h2>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>name</code></td>
+<td><code>str</code></td>
+<td>Inherited from <code>BaseAgent</code>.</td>
+</tr>
+<tr>
+<td><code>goal</code></td>
+<td><code>str</code></td>
+<td>Inherited from <code>BaseAgent</code>.</td>
+</tr>
+<tr>
+<td><code>memory</code></td>
+<td><code>list[dict]</code></td>
+<td>Episodic store (inherited).</td>
+</tr>
+<tr>
+<td><code>_examples</code></td>
+<td><code>list[tuple[str, str]]</code></td>
+<td>Raw <code>(text, label)</code> training pairs.</td>
+</tr>
+<tr>
+<td><code>_pipeline</code></td>
+<td><code>Pipeline | None</code></td>
+<td>Fitted sklearn pipeline; <code>None</code> until <code>train()</code> is called.</td>
+</tr>
+<tr>
+<td><code>_is_trained</code></td>
+<td><code>bool</code></td>
+<td><code>True</code> after a successful <code>train()</code> call; reset to <code>False</code> when new examples are added.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>4. Lifecycle</h2>
+<pre><code>                ┌─────────────────────────────────────────────┐
+                │              LearningAgent lifecycle         │
+                └─────────────────────────────────────────────┘
+
+  1. Instantiate
+        LearningAgent()
+            │
+  2. Add labelled examples
+        agent.add_examples(TRAINING_DATA)   ←── _is_trained = False
+            │
+  3. Train
+        report = agent.train()              ←── _is_trained = True
+            │
+  4. Inference (repeatable)
+        result = agent.run(&quot;user query&quot;)    ←── calls perceive→decide→act
+            │
+  5. (Optional) Add new examples &amp; retrain
+        agent.add_example(text, label)      ←── _is_trained = False (stale)
+        agent.train()                       ←── retrain on all data
+</code></pre>
+<hr>
+<h2>5. Method Specifications</h2>
+<h3><code>add_example(text: str, label: str) → None</code></h3>
+<p>Appends one <code>(text, label)</code> pair to <code>_examples</code>.  Marks the model as stale
+(<code>_is_trained = False</code>) because the pipeline no longer reflects all data.</p>
+<hr>
+<h3><code>add_examples(examples: list[tuple[str, str]]) → None</code></h3>
+<p>Batch version of <code>add_example</code>; iterates and delegates.</p>
+<hr>
+<h3><code>train(test_size: float = 0.2, random_state: int = 42) → dict</code></h3>
+<p>Trains the sklearn pipeline and returns an evaluation report.</p>
+<p><strong>Requirements:</strong> at least 4 labelled examples (raises <code>ValueError</code> otherwise).</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Unzip <code>_examples</code> into parallel <code>texts</code> / <code>labels</code> lists.</li>
+<li><code>train_test_split</code> — 80 % train / 20 % test, stratified by label.</li>
+<li>Build pipeline:<pre><code>TfidfVectorizer(ngram_range=(1,2), min_df=1)
+    └─► LogisticRegression(max_iter=1000)
+</code></pre>
+</li>
+<li><code>pipeline.fit(X_train, y_train)</code></li>
+<li><code>pipeline.predict(X_test)</code> → <code>classification_report(..., output_dict=True)</code>.</li>
+<li>Set <code>_is_trained = True</code>; return report dict.</li>
+</ol>
+<p><strong>Return value:</strong> <code>dict</code> — sklearn <code>classification_report</code> with keys per
+label plus <code>&quot;accuracy&quot;</code>, <code>&quot;macro avg&quot;</code>, <code>&quot;weighted avg&quot;</code>.</p>
+<hr>
+<h3><code>perceive(observation: Any) → str</code></h3>
+<p>Strips whitespace from the raw observation.</p>
+<pre><code class="language-python">return str(observation).strip()
+</code></pre>
+<hr>
+<h3><code>decide(perception: str) → str</code></h3>
+<p>Predicts the label for the cleaned text.</p>
+<pre><code class="language-python">predictions = self._pipeline.predict([perception])
+return str(predictions[0])
+</code></pre>
+<p>Raises <code>RuntimeError</code> if called before <code>train()</code>.</p>
+<hr>
+<h3><code>act(action: str) → dict</code></h3>
+<p>Maps a predicted label string to a business response dict.</p>
+<p><strong>Built-in intent → response map:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Intent</th>
+<th>Response</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>recommend_product</code></td>
+<td>&quot;Based on your interest, we recommend our Premium Plan.&quot;</td>
+</tr>
+<tr>
+<td><code>escalate_to_human</code></td>
+<td>&quot;Let me connect you with a specialist right away.&quot;</td>
+</tr>
+<tr>
+<td><code>provide_faq</code></td>
+<td>&quot;Here is the FAQ article that should help: /faq&quot;</td>
+</tr>
+<tr>
+<td><code>collect_feedback</code></td>
+<td>&quot;We&#39;d love to hear from you — please fill in our survey.&quot;</td>
+</tr>
+<tr>
+<td><em>(unknown)</em></td>
+<td><code>&quot;Handling intent: &lt;label&gt;&quot;</code></td>
+</tr>
+</tbody></table>
+<p><strong>Return schema:</strong></p>
+<pre><code class="language-python">{
+    &quot;predicted_intent&quot;: str,   # raw label from decide()
+    &quot;response&quot;: str            # human-readable reply
+}
+</code></pre>
+<hr>
+<h3><code>predict_proba(text: str) → dict[str, float]</code></h3>
+<p>Returns per-class probability scores for a given text (useful for confidence
+thresholding or audit logging).</p>
+<pre><code class="language-python">{&quot;recommend_product&quot;: 0.812, &quot;escalate_to_human&quot;: 0.062, ...}
+</code></pre>
+<p>Raises <code>RuntimeError</code> if the model is not yet trained.</p>
+<hr>
+<h3><code>is_trained</code> (property)</h3>
+<p>Read-only boolean; <code>True</code> when <code>_pipeline</code> is fitted and no new examples
+have been added since the last <code>train()</code> call.</p>
+<hr>
+<h2>6. Pipeline Architecture</h2>
+<pre><code>Raw text input
+   │
+   ▼  TfidfVectorizer(ngram_range=(1,2), min_df=1)
+Sparse TF-IDF matrix  (unigrams + bigrams)
+   │
+   ▼  LogisticRegression(max_iter=1000)
+Predicted class label + probability vector
+</code></pre>
+<p><strong>Why TF-IDF + LR?</strong></p>
+<ul>
+<li>Fast to train on small datasets (&lt; 10k examples).</li>
+<li>Interpretable weights — easy to debug misfires.</li>
+<li>Deterministic given <code>random_state</code> — reproducible tests.</li>
+<li>Upgradeable: swap <code>LogisticRegression</code> for <code>SGDClassifier</code> or a
+<code>sentence-transformers</code> embedder without changing the rest of the class.</li>
+</ul>
+<hr>
+<h2>7. Training Data Format</h2>
+<p>Defined in <code>data/sample_data.py</code> as <code>TRAINING_DATA</code>:</p>
+<pre><code class="language-python">TRAINING_DATA: list[tuple[str, str]] = [
+    (&quot;I&#39;m looking for a product that suits my budget&quot;, &quot;recommend_product&quot;),
+    (&quot;I want to speak to a real person&quot;,               &quot;escalate_to_human&quot;),
+    ...
+]
+</code></pre>
+<p>Minimum: 4 examples total, at least 1 per class (stratified split requires ≥ 1 per class in the test set).</p>
+<hr>
+<h2>8. Dependencies</h2>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>numpy</code></td>
+<td><code>np.round</code> in <code>predict_proba</code></td>
+</tr>
+<tr>
+<td><code>scikit-learn</code></td>
+<td><code>TfidfVectorizer</code>, <code>LogisticRegression</code>, <code>Pipeline</code>, <code>train_test_split</code>, <code>classification_report</code></td>
+</tr>
+<tr>
+<td><code>.base_agent.BaseAgent</code></td>
+<td>Inheritance</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>9. Extension Points</h2>
+<ul>
+<li><strong>Replace the classifier:</strong> swap <code>LogisticRegression</code> with any sklearn estimator that supports <code>predict</code> / <code>predict_proba</code>.</li>
+<li><strong>Replace the vectoriser:</strong> use <code>sentence-transformers</code> or <code>openai.embeddings</code> as the first pipeline stage for richer semantic features.</li>
+<li><strong>Override <code>act()</code>:</strong> plug in real routing logic (e.g., call an internal API, open a ticket in Jira) instead of returning a static string.</li>
+<li><strong>Persist the model:</strong> <code>joblib.dump(self._pipeline, &quot;model.pkl&quot;)</code> / <code>joblib.load</code> — add <code>save()</code> / <code>load()</code> methods.</li>
+</ul>
+<hr>
+<h2>10. Limitations</h2>
+<ul>
+<li>Closed-label classification — cannot predict intents it was not trained on.</li>
+<li>Training is in-memory and in-process; not suitable for datasets &gt; ~100k rows without batching.</li>
+<li>No active learning loop — manual re-labelling and retraining required.</li>
+<li><code>_examples</code> are never deduplicated; adding the same example twice biases the model.</li>
+</ul>
+<hr>
+<h2>11. Usage Example</h2>
+<pre><code class="language-python">from agents import LearningAgent
+from data.sample_data import TRAINING_DATA
+
+agent = LearningAgent()
+agent.add_examples(TRAINING_DATA)
+report = agent.train()
+print(f&quot;Accuracy: {report[&#39;accuracy&#39;]:.0%}&quot;)
+
+result = agent.run(&quot;How do I reset my password?&quot;)
+# {&quot;predicted_intent&quot;: &quot;provide_faq&quot;, &quot;response&quot;: &quot;Here is the FAQ article ...&quot;}
+
+scores = agent.predict_proba(&quot;I need to speak with someone urgently&quot;)
+# {&quot;escalate_to_human&quot;: 0.91, &quot;provide_faq&quot;: 0.04, ...}
+</code></pre>
