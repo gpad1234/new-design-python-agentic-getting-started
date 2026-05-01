@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgentSearch</title>
+  <style>
+    /* ── Reset & base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: arial, sans-serif;
+      background: #fff;
+      color: #202124;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Top-right nav ── */
+    .top-nav {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      padding: 12px 20px;
+      gap: 16px;
+      font-size: 13px;
+    }
+    .top-nav a { color: #202124; text-decoration: none; }
+    .top-nav a:hover { text-decoration: underline; }
+    .top-nav .avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: #1a73e8; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 600;
+    }
+
+    /* ── Hero / centre section ── */
+    .hero {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px 20px;
+      transition: padding 0.35s ease, justify-content 0.35s ease;
+    }
+    .hero.results-visible {
+      flex: none;
+      padding-top: 24px;
+      justify-content: flex-start;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 0;
+    }
+
+    /* ── Logo ── */
+    .logo {
+      font-size: 64px;
+      font-weight: 700;
+      letter-spacing: -2px;
+      margin-bottom: 28px;
+      user-select: none;
+      transition: font-size 0.35s ease, margin 0.35s ease;
+    }
+    .hero.results-visible .logo {
+      font-size: 28px;
+      margin-bottom: 0;
+      margin-right: 24px;
+      align-self: center;
+    }
+    .logo span:nth-child(1) { color: #4285f4; }
+    .logo span:nth-child(2) { color: #ea4335; }
+    .logo span:nth-child(3) { color: #fbbc05; }
+    .logo span:nth-child(4) { color: #4285f4; }
+    .logo span:nth-child(5) { color: #34a853; }
+    .logo span:nth-child(6) { color: #ea4335; }
+    .logo span:nth-child(7) { color: #4285f4; }
+    .logo span:nth-child(8) { color: #fbbc05; }
+    .logo span:nth-child(9) { color: #34a853; }
+
+    /* ── Search bar ── */
+    .search-section {
+      width: 100%;
+      max-width: 584px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .hero.results-visible .search-section {
+      max-width: 640px;
+    }
+
+    .search-bar {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      border: 1px solid #dfe1e5;
+      border-radius: 24px;
+      padding: 10px 16px;
+      gap: 8px;
+      background: #fff;
+      box-shadow: none;
+      transition: box-shadow 0.2s;
+    }
+    .search-bar:focus-within {
+      box-shadow: 0 1px 6px rgba(32,33,36,.28);
+      border-color: transparent;
+    }
+    .search-icon {
+      color: #9aa0a6;
+      flex-shrink: 0;
+    }
+    #query {
+      flex: 1;
+      border: none;
+      outline: none;
+      font-size: 16px;
+      color: #202124;
+      background: transparent;
+    }
+    .clear-btn {
+      background: none; border: none; cursor: pointer;
+      color: #70757a; font-size: 18px; padding: 2px 4px;
+      display: none;
+    }
+    .clear-btn.visible { display: block; }
+
+    /* ── Agent mode pills ── */
+    .agent-pills {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .pill {
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      border: 1px solid #dfe1e5;
+      background: #fff;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      color: #3c4043;
+    }
+    .pill:hover { background: #f8f9fa; }
+    .pill.active { background: #e8f0fe; border-color: #4285f4; color: #1a73e8; font-weight: 600; }
+
+    /* ── Buttons ── */
+    .buttons {
+      display: flex;
+      gap: 8px;
+    }
+    .btn {
+      padding: 9px 20px;
+      font-size: 14px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      background: #f8f9fa;
+      color: #3c4043;
+      cursor: pointer;
+      transition: background 0.15s, box-shadow 0.15s;
+    }
+    .btn:hover { box-shadow: 0 1px 3px rgba(0,0,0,.2); background: #f8f9fa; border-color: #dadce0; }
+    .btn.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+    .btn.primary:hover { background: #1765cc; border-color: #1765cc; }
+
+    /* ── Results panel ── */
+    #results-panel {
+      width: 100%;
+      max-width: 640px;
+      margin-top: 24px;
+      display: none;
+      flex-direction: column;
+      gap: 16px;
+    }
+    #results-panel.visible { display: flex; }
+
+    /* stats bar */
+    .stats-bar {
+      font-size: 13px;
+      color: #70757a;
+      padding: 0 4px;
+    }
+    .stats-bar .agent-badge {
+      display: inline-block;
+      background: #e8f0fe;
+      color: #1a73e8;
+      border-radius: 10px;
+      padding: 1px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-left: 6px;
+      text-transform: capitalize;
+    }
+
+    /* result card */
+    .result-card {
+      border: 1px solid #dfe1e5;
+      border-radius: 12px;
+      padding: 20px 24px;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+      animation: fadeIn 0.25s ease;
+    }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+
+    .result-card .source {
+      font-size: 12px;
+      color: #70757a;
+      margin-bottom: 4px;
+    }
+    .result-card .response-text {
+      font-size: 16px;
+      color: #202124;
+      line-height: 1.55;
+    }
+    .meta-row {
+      margin-top: 12px;
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: #9aa0a6;
+      flex-wrap: wrap;
+    }
+    .meta-row span b { color: #5f6368; font-weight: 600; }
+
+    /* intent chip */
+    .intent-chip {
+      display: inline-block;
+      background: #fce8e6;
+      color: #c5221f;
+      border-radius: 10px;
+      padding: 1px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-left: 8px;
+    }
+
+    /* loading dots */
+    .loader { display: flex; gap: 6px; align-items: center; justify-content: center; padding: 20px; }
+    .loader span {
+      width: 8px; height: 8px; border-radius: 50%;
+      animation: bounce 0.9s ease infinite;
+    }
+    .loader span:nth-child(1) { background:#4285f4; animation-delay:0s; }
+    .loader span:nth-child(2) { background:#ea4335; animation-delay:0.15s; }
+    .loader span:nth-child(3) { background:#fbbc05; animation-delay:0.30s; }
+    .loader span:nth-child(4) { background:#34a853; animation-delay:0.45s; }
+    @keyframes bounce { 0%,80%,100%{transform:scale(0.6)} 40%{transform:scale(1)} }
+
+    /* error card */
+    .error-card {
+      border: 1px solid #fce8e6;
+      border-radius: 12px;
+      padding: 16px 20px;
+      background: #fff8f7;
+      color: #c5221f;
+      font-size: 14px;
+    }
+
+    /* history list */
+    .history-label {
+      font-size: 12px;
+      color: #9aa0a6;
+      padding: 0 4px;
+      margin-top: 8px;
+    }
+    .history-list { display: flex; flex-direction: column; gap: 2px; }
+    .history-item {
+      font-size: 14px;
+      color: #1a73e8;
+      cursor: pointer;
+      padding: 6px 4px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .history-item:hover { background: #f8f9fa; }
+    .history-item svg { flex-shrink: 0; color: #9aa0a6; }
+
+    /* ── Footer ── */
+    footer {
+      background: #f2f2f2;
+      border-top: 1px solid #e4e4e4;
+      padding: 12px 24px;
+      font-size: 13px;
+      color: #70757a;
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+    }
+    footer a { color: #70757a; text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<!-- Top Nav -->
+<nav class="top-nav">
+  <a href="#">About</a>
+  <a href="#">Settings</a>
+  <div class="avatar">A</div>
+</nav>
+
+<!-- Hero -->
+<main class="hero" id="hero">
+
+  <!-- Logo -->
+  <div class="logo" id="logo">
+    <span>A</span><span>g</span><span>e</span><span>n</span><span>t</span>
+    <span>A</span><span>I</span>
+  </div>
+
+  <!-- Search section -->
+  <div class="search-section" id="search-section">
+
+    <!-- Bar -->
+    <div class="search-bar">
+      <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5
+                 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5
+                 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5
+                 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+      </svg>
+      <input
+        id="query"
+        type="text"
+        placeholder="Ask an agent anything…"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button class="clear-btn" id="clear-btn" title="Clear" onclick="clearQuery()">✕</button>
+    </div>
+
+    <!-- Agent pills -->
+    <div class="agent-pills">
+      <button class="pill active" data-agent="reactive" onclick="selectAgent(this)">⚡ Reactive</button>
+      <button class="pill" data-agent="learning" onclick="selectAgent(this)">🧠 Learning</button>
+      <button class="pill" data-agent="llm" onclick="selectAgent(this)">✨ LLM</button>
+    </div>
+
+    <!-- Buttons -->
+    <div class="buttons">
+      <button class="btn primary" onclick="submitQuery()">Ask Agent</button>
+      <button class="btn" onclick="feelingLucky()">I'm Feeling Lucky</button>
+    </div>
+
+  </div>
+
+  <!-- Results -->
+  <div id="results-panel">
+    <div class="stats-bar" id="stats-bar"></div>
+    <div id="results-content"></div>
+    <div class="history-label" id="history-label" style="display:none">Recent queries</div>
+    <div class="history-list" id="history-list"></div>
+  </div>
+
+</main>
+
+<footer>
+  <a href="#">About AgentAI</a>
+  <a href="#">Privacy</a>
+  <a href="#">Terms</a>
+  <a href="#">Settings</a>
+</footer>
+
+<script>
+  const LUCKY_QUERIES = [
+    "How do I reset my password?",
+    "What are your business hours?",
+    "I need a refund for my order",
+    "Can you recommend a product for a small team?",
+    "I want to speak to a real person",
+    "How does billing work?",
+    "I'd like to leave a review",
+    "When will my package arrive?",
+  ];
+
+  let selectedAgent = "reactive";
+  const history = [];
+
+  // ── Agent selection ──────────────────────────────────────────────────────
+  function selectAgent(btn) {
+    document.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    selectedAgent = btn.dataset.agent;
+  }
+
+  // ── Clear input ──────────────────────────────────────────────────────────
+  function clearQuery() {
+    const input = document.getElementById("query");
+    input.value = "";
+    document.getElementById("clear-btn").classList.remove("visible");
+    input.focus();
+  }
+
+  document.getElementById("query").addEventListener("input", function () {
+    document.getElementById("clear-btn").classList.toggle("visible", this.value.length > 0);
+  });
+
+  // ── Keyboard shortcut ────────────────────────────────────────────────────
+  document.getElementById("query").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") submitQuery();
+  });
+
+  // ── I'm Feeling Lucky ────────────────────────────────────────────────────
+  function feelingLucky() {
+    const q = LUCKY_QUERIES[Math.floor(Math.random() * LUCKY_QUERIES.length)];
+    document.getElementById("query").value = q;
+    document.getElementById("clear-btn").classList.add("visible");
+    submitQuery();
+  }
+
+  // ── Submit ───────────────────────────────────────────────────────────────
+  async function submitQuery() {
+    const input   = document.getElementById("query");
+    const message = input.value.trim();
+    if (!message) { input.focus(); return; }
+
+    const hero    = document.getElementById("hero");
+    const panel   = document.getElementById("results-panel");
+    const content = document.getElementById("results-content");
+    const stats   = document.getElementById("stats-bar");
+
+    // Transition to results layout
+    hero.classList.add("results-visible");
+    panel.classList.add("visible");
+    stats.innerHTML = "";
+    content.innerHTML = loadingDots();
+
+    try {
+      const t0 = performance.now();
+      const res = await fetch("/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, agent: selectedAgent }),
+      });
+      const data = await res.json();
+      const clientMs = Math.round(performance.now() - t0);
+
+      if (!res.ok) {
+        content.innerHTML = errorCard(data.error || "Server error");
+        return;
+      }
+
+      // Stats bar
+      stats.innerHTML =
+        `About 1 result <span style="color:#70757a">(${clientMs} ms)</span>` +
+        `<span class="agent-badge">${data.agent}</span>`;
+
+      // Result card
+      const intentHtml = data.intent && data.intent !== "—"
+        ? `<span class="intent-chip">intent: ${data.intent}</span>`
+        : "";
+
+      content.innerHTML = `
+        <div class="result-card">
+          <div class="source">agentai.local › ${data.agent}</div>
+          <div class="response-text">${escHtml(data.response)}${intentHtml}</div>
+          <div class="meta-row">
+            <span><b>Agent:</b> ${data.agent}</span>
+            <span><b>Server time:</b> ${data.elapsed_ms} ms</span>
+            ${data.intent !== "—" ? `<span><b>Intent:</b> ${data.intent}</span>` : ""}
+          </div>
+        </div>`;
+
+      addToHistory(message);
+    } catch (err) {
+      content.innerHTML = errorCard("Could not reach the agent server. Is server.py running?");
+    }
+  }
+
+  // ── History ──────────────────────────────────────────────────────────────
+  function addToHistory(query) {
+    if (history.includes(query)) return;
+    history.unshift(query);
+    if (history.length > 6) history.pop();
+    renderHistory();
+  }
+
+  function renderHistory() {
+    const label = document.getElementById("history-label");
+    const list  = document.getElementById("history-list");
+    if (history.length === 0) { label.style.display = "none"; return; }
+    label.style.display = "block";
+    list.innerHTML = history.map(q => `
+      <div class="history-item" onclick="reuseQuery(${JSON.stringify(q)})">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87
+                   3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79
+                   -4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0
+                   0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/>
+        </svg>
+        ${escHtml(q)}
+      </div>`).join("");
+  }
+
+  function reuseQuery(q) {
+    document.getElementById("query").value = q;
+    document.getElementById("clear-btn").classList.add("visible");
+    submitQuery();
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  function loadingDots() {
+    return `<div class="loader">
+      <span></span><span></span><span></span><span></span>
+    </div>`;
+  }
+
+  function errorCard(msg) {
+    return `<div class="error-card">⚠ ${escHtml(msg)}</div>`;
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g,"&amp;")
+      .replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;")
+      .replace(/"/g,"&quot;");
+  }
+</script>
+</body>
+</html>
