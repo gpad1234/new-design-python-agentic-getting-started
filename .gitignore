@@ -3,6 +3,9 @@
 env/
 venv/
 
+# Secrets — never commit
+.env
+
 # Python
 __pycache__/
 *.py[cod]
